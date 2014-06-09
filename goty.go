@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+var Debug = false
+
 var numericReplyExp *regexp.Regexp = regexp.MustCompile(`\A(\d\d\d) .*`)
 
 type IRCConn struct {
@@ -36,6 +38,7 @@ func (con *IRCConn) Connect(server, nick string) error {
 
 	r := bufio.NewReader(con.Sock)
 	w := bufio.NewWriter(con.Sock)
+	nickSuccess := make(chan interface{})
 
 	go func() {
 		nickNum := 1
@@ -44,6 +47,9 @@ func (con *IRCConn) Connect(server, nick string) error {
 			if str, err = r.ReadString(byte('\n')); err != nil {
 				fmt.Fprintf(os.Stderr, "goty: read: %s\n", err.Error())
 				break
+			}
+			if Debug {
+				fmt.Fprintf(os.Stderr, "<- %s\n", str)
 			}
 			s := str
 			if strings.HasPrefix(s, ":") {
@@ -61,9 +67,11 @@ func (con *IRCConn) Connect(server, nick string) error {
 				// 436 - ERR_NICKCOLLISION
 				// 437 - ERR_UNAVAILRESOURCE
 				case "433", "436", "437":
-					con.Write <- fmt.Sprintf("%s%d", nick, nickNum)
+					con.Write <- fmt.Sprintf("NICK %s%d", nick, nickNum)
 					nickNum++
 					continue
+				case "001":
+					close(nickSuccess)
 				}
 			}
 			con.Read <- str[0 : len(str)-2]
@@ -74,11 +82,17 @@ func (con *IRCConn) Connect(server, nick string) error {
 		for {
 			str, ok := <-con.Write
 			if !ok {
-				fmt.Fprintf(os.Stderr, "goty: write closed\n")
+				if Debug {
+					fmt.Fprintf(os.Stderr, "goty: write closed\n")
+				}
+				con.Close()
 				break
 			}
+			if Debug {
+				fmt.Fprintln(os.Stderr, "-> ", str)
+			}
 			if _, err := w.WriteString(str + "\r\n"); err != nil {
-				fmt.Fprintf(os.Stderr, "goty: write: %s\n", err.Error())
+				fmt.Fprintf(os.Stderr, "goty: write: %v\n", err)
 				break
 			}
 			w.Flush()
@@ -87,6 +101,7 @@ func (con *IRCConn) Connect(server, nick string) error {
 
 	con.Write <- "NICK " + nick
 	con.Write <- "USER bot * * :..."
+	<-nickSuccess
 	return nil
 }
 

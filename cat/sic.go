@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/methane/goty"
 )
@@ -28,28 +29,49 @@ func main() {
 	}
 	in := bufio.NewReader(os.Stdin)
 
+	connClosed := make(chan interface{})
+	stdinRead := make(chan string)
+
 	go func() {
 		for {
 			str, ok := <-con.Read
 			if !ok {
+				connClosed <- nil
 				break
 			}
 			fmt.Printf("<- %s\n", str)
 		}
 	}()
 
-	con.Write <- "JOIN " + *chan_
+	con.Write <- "JOIN #" + *chan_
 
-	for {
-		input, err := in.ReadString('\n')
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "goty: %v\n", err)
-			break
+	// Read lines from string
+	go func() {
+		for {
+			input, err := in.ReadString('\n')
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "goty: %v\n", err)
+				close(stdinRead)
+				break
+			}
+			stdinRead <- strings.TrimRight(input, "\r\n ")
 		}
-		fmt.Printf("-> %s", input)
-		con.Write <- "NOTICE " + *chan_ + input[:len(input)-1]
-	}
-	if err := con.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "goty: %v\n", err)
+	}()
+
+main:
+	for {
+		select {
+		case input, ok := <-stdinRead:
+			if !ok {
+				close(con.Write)
+				break main
+			}
+			com := fmt.Sprintf("NOTICE #%s %s", *chan_, input)
+			fmt.Printf("-> %s\n", com)
+			con.Write <- com
+		case <-connClosed: // connection closed by peer.
+			close(con.Write)
+			break main
+		}
 	}
 }
