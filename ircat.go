@@ -7,10 +7,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/methane/goty"
+	"github.com/methane/ircat/goty"
 )
 
-var server *string = flag.String("server", "irc.freenode.org:6667", "Server to connect to in format 'irc.freenode.org:6667'")
+var server *string = flag.String("server", "irc.freenode.org:6667",
+	"Server to connect to in format 'irc.freenode.org:6667'")
 var nick *string = flag.String("nick", "goty-bot", "IRC nick to use")
 var chan_ *string = flag.String("chan", "", "Channel to send")
 
@@ -64,13 +65,13 @@ main:
 		case input, ok := <-stdinRead:
 			if !ok {
 				close(con.Write)
-				break main
+				stdinRead = nil
+				continue
 			}
 			com := fmt.Sprintf("NOTICE #%s %s", *chan_, input)
 			fmt.Printf("-> %s\n", com)
 			con.Write <- com
-		case <-connClosed: // connection closed by peer.
-			close(con.Write)
+		case <-connClosed:
 			break main
 		}
 	}

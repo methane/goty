@@ -19,8 +19,8 @@ type IRCConn struct {
 }
 
 func Dial(server, nick string) (*IRCConn, error) {
-	read := make(chan string, 1000)
-	write := make(chan string, 1000)
+	read := make(chan string)
+	write := make(chan string)
 	con := &IRCConn{nil, read, write}
 	err := con.Connect(server, nick)
 	return con, err
@@ -46,6 +46,7 @@ func (con *IRCConn) Connect(server, nick string) error {
 			var str string
 			if str, err = r.ReadString(byte('\n')); err != nil {
 				fmt.Fprintf(os.Stderr, "goty: read: %s\n", err.Error())
+				close(con.Read)
 				break
 			}
 			if Debug {
@@ -79,13 +80,13 @@ func (con *IRCConn) Connect(server, nick string) error {
 	}()
 
 	go func() {
+		defer con.Sock.CloseWrite()
 		for {
 			str, ok := <-con.Write
 			if !ok {
 				if Debug {
 					fmt.Fprintf(os.Stderr, "goty: write closed\n")
 				}
-				con.Close()
 				break
 			}
 			if Debug {
@@ -103,10 +104,4 @@ func (con *IRCConn) Connect(server, nick string) error {
 	con.Write <- "USER bot * * :..."
 	<-nickSuccess
 	return nil
-}
-
-func (con *IRCConn) Close() error {
-	close(con.Read)
-	close(con.Write)
-	return con.Sock.Close()
 }
