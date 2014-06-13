@@ -10,21 +10,22 @@ import (
 	"github.com/methane/ircat/goty"
 )
 
-var server *string = flag.String("server", "irc.freenode.org:6667",
-	"Server to connect to in format 'irc.freenode.org:6667'")
-var nick *string = flag.String("nick", "goty-bot", "IRC nick to use")
-var chan_ *string = flag.String("chan", "", "Channel to send")
-
 func main() {
+	var server, nick, channel string
+
+	flag.StringVar(&server, "server", "irc.freenode.org:6667",
+		"Server to connect to in format 'irc.freenode.org:6667'")
+	flag.StringVar(&nick, "nick", "goty-bot", "IRC nick")
+	flag.StringVar(&channel, "chan", "", "IRC channel (without #)")
+	flag.BoolVar(&goty.Debug, "debug", false, "debug mode")
 	flag.Parse()
 
-	if chan_ == nil || *chan_ == "" {
+	if channel == "" {
 		fmt.Fprintln(os.Stderr, "goty: No channnel specified")
 		return
 	}
-	var err error
-	var con *goty.IRCConn
-	if con, err = goty.Dial(*server, *nick); err != nil {
+	con, err := goty.Dial(server, nick)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "goty: %v\n", err)
 		return
 	}
@@ -40,11 +41,11 @@ func main() {
 				connClosed <- nil
 				break
 			}
-			fmt.Printf("<- %s\n", str)
+			fmt.Printf("<- %#v\n", str)
 		}
 	}()
 
-	con.Write <- "JOIN #" + *chan_
+	con.Write <- "JOIN #" + channel
 
 	// Read lines from string
 	go func() {
@@ -68,11 +69,15 @@ main:
 				stdinRead = nil
 				continue
 			}
-			com := fmt.Sprintf("NOTICE #%s %s", *chan_, input)
-			fmt.Printf("-> %s\n", com)
+			com := fmt.Sprintf("NOTICE #%s %s", channel, input)
+			if goty.Debug {
+				fmt.Printf("-> %s\n", com)
+			}
 			con.Write <- com
 		case <-connClosed:
 			break main
 		}
 	}
+
+	con.Wait()
 }

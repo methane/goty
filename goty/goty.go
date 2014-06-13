@@ -7,6 +7,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 )
 
 var Debug = false
@@ -14,6 +16,7 @@ var Debug = false
 var numericReplyExp *regexp.Regexp = regexp.MustCompile(`\A(\d\d\d) .*`)
 
 type IRCConn struct {
+	sync.WaitGroup
 	Sock        *net.TCPConn
 	Read, Write chan string
 }
@@ -21,7 +24,9 @@ type IRCConn struct {
 func Dial(server, nick string) (*IRCConn, error) {
 	read := make(chan string)
 	write := make(chan string)
-	con := &IRCConn{nil, read, write}
+	con := &IRCConn{
+		Sock: nil,
+		Read: read, Write: write}
 	err := con.Connect(server, nick)
 	return con, err
 }
@@ -39,18 +44,22 @@ func (con *IRCConn) Connect(server, nick string) error {
 	r := bufio.NewReader(con.Sock)
 	w := bufio.NewWriter(con.Sock)
 	nickSuccess := make(chan interface{})
+	con.Add(2)
 
 	go func() {
+		defer con.Done()
 		nickNum := 1
+		nickSucceed := false
+
 		for {
-			var str string
-			if str, err = r.ReadString(byte('\n')); err != nil {
-				fmt.Fprintf(os.Stderr, "goty: read: %s\n", err.Error())
+			str, err := r.ReadString(byte('\n'))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "goty: read: %#v\n", err)
 				close(con.Read)
 				break
 			}
 			if Debug {
-				fmt.Fprintf(os.Stderr, "<- %s\n", str)
+				fmt.Fprintf(os.Stderr, "<- %#v\n", str)
 			}
 			s := str
 			if strings.HasPrefix(s, ":") {
@@ -73,14 +82,21 @@ func (con *IRCConn) Connect(server, nick string) error {
 					continue
 				case "001":
 					close(nickSuccess)
+					nickSucceed = true
+					continue
 				}
 			}
-			con.Read <- str[0 : len(str)-2]
+			if nickSucceed {
+				con.Read <- str[0 : len(str)-2]
+			}
 		}
 	}()
 
 	go func() {
-		defer con.Sock.CloseWrite()
+		defer func() {
+			con.Sock.CloseWrite()
+			con.Done()
+		}()
 		for {
 			str, ok := <-con.Write
 			if !ok {
@@ -90,7 +106,7 @@ func (con *IRCConn) Connect(server, nick string) error {
 				break
 			}
 			if Debug {
-				fmt.Fprintln(os.Stderr, "-> ", str)
+				fmt.Fprintf(os.Stderr, "-> %#v\n", str)
 			}
 			if _, err := w.WriteString(str + "\r\n"); err != nil {
 				fmt.Fprintf(os.Stderr, "goty: write: %v\n", err)
@@ -100,6 +116,7 @@ func (con *IRCConn) Connect(server, nick string) error {
 		}
 	}()
 
+	time.Sleep(time.Second)
 	con.Write <- "NICK " + nick
 	con.Write <- "USER bot * * :..."
 	<-nickSuccess
