@@ -32,8 +32,8 @@ func main() {
 	in := bufio.NewReader(os.Stdin)
 
 	connClosed := make(chan interface{})
-	stdinRead := make(chan string)
 
+	// Read from IRC and write to stdout.
 	go func() {
 		for {
 			str, ok := <-con.Read
@@ -41,43 +41,35 @@ func main() {
 				connClosed <- nil
 				break
 			}
-			fmt.Printf("<- %#v\n", str)
+			if strings.HasPrefix(str, "PRIVMSG ") || strings.HasPrefix(str, "NOTICE ") {
+				str = str[strings.IndexRune(str, ' ')+1:]
+				pos := strings.IndexRune(str, ' ')
+				if pos > 0 {
+					str = str[pos+1:]
+					if str[0] == ':' {
+						str = str[1:]
+					}
+					fmt.Println(str)
+				}
+			}
 		}
 	}()
 
 	con.Write <- "JOIN #" + channel
 
-	// Read lines from string
+	// Read lines from stdin and send to IRC.
 	go func() {
 		for {
 			input, err := in.ReadString('\n')
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "goty: %v\n", err)
-				close(stdinRead)
+				close(con.Write)
 				break
 			}
-			stdinRead <- strings.TrimRight(input, "\r\n ")
+			con.Write <- fmt.Sprintf("NOTICE #%s :%s", channel, strings.TrimRight(input, "\r\n "))
 		}
 	}()
 
-main:
-	for {
-		select {
-		case input, ok := <-stdinRead:
-			if !ok {
-				close(con.Write)
-				stdinRead = nil
-				continue
-			}
-			com := fmt.Sprintf("NOTICE #%s %s", channel, input)
-			if goty.Debug {
-				fmt.Printf("-> %s\n", com)
-			}
-			con.Write <- com
-		case <-connClosed:
-			break main
-		}
-	}
-
+	<-connClosed
 	con.Wait()
 }

@@ -87,7 +87,7 @@ func (con *IRCConn) Connect(server, nick string) error {
 				}
 			}
 			if nickSucceed {
-				con.Read <- str[0 : len(str)-2]
+				con.Read <- s[0 : len(s)-2]
 			}
 		}
 	}()
